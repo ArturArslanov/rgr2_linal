@@ -1,21 +1,21 @@
 """
-Exact Jordan normal form over algebraic numbers using SymPy.
+Точная жорданова нормальная форма над алгебраическими числами с использованием SymPy.
 
-Allowed library usage:
-- symbolic Matrix storage and basic operations;
-- characteristic polynomial and polynomial factorization;
-- symbolic rank, nullspace, inverse.
+Разрешённые инструменты библиотеки:
+- символьное хранение матриц и базовые операции;
+- характеристический многочлен и факторизация многочленов;
+- символьный ранг, нулевое пространство, обратная матрица.
 
-Forbidden and NOT used:
+Запрещено и НЕ используется:
 - eigenvals/eigenvects;
 - SVD;
-- jordan_form or any ready Jordan decomposition routine.
+- jordan_form или любые готовые процедуры разложения по Жордану.
 
-Core logic implemented manually:
-- block sizes via defects dim Ker((A - lambda I)^k);
-- generalized eigenspaces;
-- Jordan chain construction;
-- transition matrix P such that A * P = P * J.
+Основная логика реализована вручную:
+- размеры блоков через дефекты dim Ker((A - lambda I)^k);
+- обобщённые собственные подпространства;
+- построение жордановых цепочек;
+- матрица перехода P такая, что A * P = P * J.
 """
 
 import random
@@ -26,7 +26,7 @@ x = sp.Symbol("x")
 
 
 # =========================================================
-# Printing helpers
+# Вспомогательные функции вывода
 # =========================================================
 
 
@@ -37,7 +37,7 @@ def print_title(title: str):
 
 
 # =========================================================
-# Basic exact linear algebra wrappers
+# Обёртки для точной линейной алгебры
 # =========================================================
 
 
@@ -52,6 +52,7 @@ def matrix_rank(A):
 
 
 def defect(A):
+    """Дефект матрицы: число столбцов минус ранг."""
     A = as_matrix(A)
     return A.cols - A.rank()
 
@@ -63,6 +64,7 @@ def nullspace(A):
 
 
 def is_independent(vectors):
+    """Проверяет, являются ли векторы линейно независимыми."""
     if not vectors:
         return True
     M = sp.Matrix.hstack(*vectors)
@@ -71,18 +73,19 @@ def is_independent(vectors):
 
 
 def independent_after_adding(current_basis, new_vectors):
+    """Проверяет, останется ли система независимой после добавления новых векторов."""
     return is_independent(current_basis + new_vectors)
 
 
 # =========================================================
-# Characteristic roots without eigenvalue routines
+# Алгебраические корни без использования процедур поиска собственных значений
 # =========================================================
 
 
 def characteristic_polynomial(A):
     """
-    Returns exact characteristic polynomial det(tI - A).
-    This uses charpoly, not eigenvalue routines.
+    Возвращает точный характеристический многочлен det(tI - A).
+    Использует charpoly, а не процедуры поиска собственных значений.
     """
     A = as_matrix(A)
     return A.charpoly(x).as_expr()
@@ -91,14 +94,15 @@ def characteristic_polynomial(A):
 
 def algebraic_roots_with_multiplicities(A):
     """
-    Finds exact symbolic roots of the characteristic polynomial.
+    Находит точные символьные корни характеристического многочлена.
 
-    We factor p(x). For each irreducible factor f(x)^m, roots are represented
-    as CRootOf(f, i). If the factor is linear or has radical roots that SymPy
-    can express explicitly, roots() may return explicit expressions.
+    Многочлен p(x) факторизуется. Для каждого неприводимого множителя f(x)^m
+    корни представляются как CRootOf(f, i). Если множитель линейный или имеет
+    радикальные корни, которые SymPy может выразить явно, roots() может вернуть
+    явные выражения.
 
-    Returns:
-        [(lambda_expr, algebraic_multiplicity), ...]
+    Возвращает:
+        [(lambda_expr, алгебраическая_кратность), ...]
     """
     p_expr = sp.factor(characteristic_polynomial(A))
     p_poly = sp.Poly(p_expr, x, extension=True)
@@ -115,23 +119,24 @@ def algebraic_roots_with_multiplicities(A):
             for root, root_mult_inside_factor in explicit_roots.items():
                 result.append((sp.simplify(root), root_mult_inside_factor * factor_power))
         else:
-            # Algebraic roots represented exactly as CRootOf.
-            # all_roots(radicals=False) returns exact algebraic RootOf/CRootOf objects.
+            # Алгебраические корни, представленные точно как CRootOf.
+            # all_roots(radicals=False) возвращает точные алгебраические объекты RootOf/CRootOf.
             roots = factor_poly.all_roots(radicals=False)
             for root in roots:
                 result.append((root, factor_power))
 
-    # Stable deterministic order by string representation.
+    # Устойчивый детерминированный порядок по строковому представлению.
     result.sort(key=lambda item: str(item[0]))
     return result
 
 
 # =========================================================
-# Jordan block sizes from defects
+# Размеры жордановых блоков через дефекты
 # =========================================================
 
 
 def shifted_matrix(A, lam):
+    """Возвращает сдвинутую матрицу A - lambda * I."""
     A = as_matrix(A)
     return A - lam * sp.eye(A.rows)
 
@@ -139,13 +144,13 @@ def shifted_matrix(A, lam):
 
 def jordan_block_sizes(A, lam, algebraic_multiplicity):
     """
-    Let N = A - lambda I.
+    Пусть N = A - lambda I.
     d_k = dim Ker(N^k).
 
-    Number of Jordan blocks of size >= k:
+    Число жордановых блоков размера >= k:
         b_k = d_k - d_{k-1}
 
-    Number of Jordan blocks of exact size k:
+    Число жордановых блоков точного размера k:
         e_k = b_k - b_{k+1}
     """
     N = shifted_matrix(A, lam)
@@ -168,18 +173,18 @@ def jordan_block_sizes(A, lam, algebraic_multiplicity):
 
 
 # =========================================================
-# Jordan chain construction
+# Построение жордановых цепочек
 # =========================================================
 
 
 def build_chain_from_top(N, top, size):
     """
-    Given top vector w with N^size w = 0,
-    construct the ordered chain
+    Дан вектор w верхнего уровня такой, что N^size w = 0.
+    Строит упорядоченную цепочку:
 
         N^(size-1) w, ..., Nw, w.
 
-    With this order, the Jordan block has ones above the diagonal.
+    При таком порядке жорданов блок содержит единицы над главной диагональю.
     """
     chain = [None] * size
     chain[-1] = top
@@ -192,19 +197,20 @@ def build_chain_from_top(N, top, size):
 
 
 def is_zero_vector(v):
+    """Проверяет, является ли вектор нулевым."""
     return all(sp.simplify(entry) == 0 for entry in v)
 
 
 
 def construct_chains_for_eigenvalue(A, lam, block_sizes):
     """
-    Builds Jordan chains for a fixed eigenvalue.
+    Строит жордановы цепочки для фиксированного собственного значения.
 
-    Strategy:
-    - process larger blocks first;
-    - for block size s, try vectors from Ker(N^s);
-    - keep the first generated chain that remains linearly independent
-      from all previously chosen chain vectors.
+    Стратегия:
+    - сначала обрабатываются блоки большего размера;
+    - для блока размера s перебираются векторы из Ker(N^s);
+    - берётся первая сгенерированная цепочка, линейно независимая
+      от всех ранее выбранных векторов цепочек.
     """
     N = shifted_matrix(A, lam)
     chosen_vectors = []
@@ -228,31 +234,31 @@ def construct_chains_for_eigenvalue(A, lam, block_sizes):
 
         if not added:
             raise RuntimeError(
-                f"Could not construct a Jordan chain for lambda={lam}, size={size}. "
-                "Try a more robust complement-selection routine."
+                f"Не удалось построить жорданову цепочку для lambda={lam}, size={size}. "
+                "Попробуйте более надёжную процедуру выбора дополнения."
             )
 
     return chains
 
 
 # =========================================================
-# Main exact Jordan algorithm
+# Основной алгоритм точной жордановой формы
 # =========================================================
 
 
 def jordan_form_exact(A):
     """
-    Returns exact symbolic matrices J and P such that
+    Возвращает точные символьные матрицы J и P такие, что
 
         A * P = P * J
 
-    and therefore
+    и, следовательно,
 
         A = P * J * P^{-1}.
     """
     A = as_matrix(A)
     if A.rows != A.cols:
-        raise ValueError("Jordan form is defined only for square matrices")
+        raise ValueError("Жорданова форма определена только для квадратных матриц")
 
     n = A.rows
     roots = algebraic_roots_with_multiplicities(A)
@@ -262,9 +268,9 @@ def jordan_form_exact(A):
     current_col = 0
     structure = []
 
-    print("Characteristic polynomial:")
+    print("Характеристический многочлен:")
     print(sp.factor(characteristic_polynomial(A)))
-    print("\nExact roots and algebraic multiplicities:")
+    print("\nТочные корни и алгебраические кратности:")
     for lam, mult in roots:
         print(f"  lambda = {lam}, mult = {mult}")
 
@@ -274,7 +280,7 @@ def jordan_form_exact(A):
         chains = construct_chains_for_eigenvalue(A, lam, sizes)
 
         print(f"\nlambda = {lam}")
-        print(f"Jordan block sizes: {sizes}")
+        print(f"Размеры жордановых блоков: {sizes}")
 
         for chain, size in zip(chains, sizes):
             for v in chain:
@@ -290,17 +296,18 @@ def jordan_form_exact(A):
     P = sp.Matrix.hstack(*P_cols)
 
     if P.det() == 0:
-        raise RuntimeError("Constructed P is singular")
+        raise RuntimeError("Построенная матрица P вырождена")
 
     return sp.simplify(J), sp.simplify(P), structure
 
 
 # =========================================================
-# Test generator
+# Генератор тестов
 # =========================================================
 
 
 def jordan_block(lam, size):
+    """Создаёт один жорданов блок заданного размера."""
     B = sp.zeros(size, size)
     for i in range(size):
         B[i, i] = lam
@@ -312,8 +319,10 @@ def jordan_block(lam, size):
 
 def make_jordan_matrix(block_specs):
     """
-    block_specs: list of pairs (lambda, size)
-    Example:
+    Строит блочно-диагональную жорданову матрицу по заданным спецификациям блоков.
+
+    block_specs: список пар (lambda, size)
+    Пример:
         [(sp.sqrt(2), 2), (sp.sqrt(2), 1), (3, 1)]
     """
     blocks = [jordan_block(lam, size) for lam, size in block_specs]
@@ -323,13 +332,13 @@ def make_jordan_matrix(block_specs):
 
 def random_unimodular_matrix(n, steps=20, entry_bound=3, seed=None):
     """
-    Generates an integer unimodular matrix using elementary row operations.
-    Determinant is always +1 or -1.
+    Генерирует целочисленную унимодулярную матрицу с помощью элементарных операций над строками.
+    Определитель всегда равен +1 или -1.
     """
     if seed is not None:
         random.seed(seed)
     if n <= 0:
-        raise ValueError("Matrix size must be positive")
+        raise ValueError("Размер матрицы должен быть положительным")
 
     if n == 1:
         return sp.Matrix([[random.choice([1, -1])]])
@@ -340,10 +349,12 @@ def random_unimodular_matrix(n, steps=20, entry_bound=3, seed=None):
         op = random.choice(["swap", "add", "neg"])
 
         if op == "swap":
+            # Перестановка двух строк
             i, j = random.sample(range(n), 2)
             P.row_swap(i, j)
 
         elif op == "add":
+            # Прибавление к строке кратного другой строки
             i, j = random.sample(range(n), 2)
             k = random.randint(-entry_bound, entry_bound)
             if k == 0:
@@ -351,6 +362,7 @@ def random_unimodular_matrix(n, steps=20, entry_bound=3, seed=None):
             P.row_op(i, lambda value, col: value + k * P[j, col])
 
         elif op == "neg":
+            # Умножение строки на -1
             i = random.randrange(n)
             P.row_op(i, lambda value, col: -value)
 
@@ -360,7 +372,7 @@ def random_unimodular_matrix(n, steps=20, entry_bound=3, seed=None):
 
 def same_jordan_structure(structure_1, structure_2):
     """
-    Compares Jordan structures by exact eigenvalues and block sizes.
+    Сравнивает жордановы структуры по точным собственным значениям и размерам блоков.
     """
     def normalize(structure):
         result = []
@@ -375,26 +387,26 @@ def same_jordan_structure(structure_1, structure_2):
 
 def generated_test(block_specs, seed=0):
     """
-    Generate:
-        J0 - desired Jordan matrix;
-        P0 - random unimodular transition matrix;
-        A  = P0 J0 P0^{-1}.
+    Генерация теста:
+        J0 - желаемая жорданова матрица;
+        P0 - случайная унимодулярная матрица перехода;
+        A  = P0 * J0 * P0^{-1}.
 
-    Then run jordan_form_exact(A) and compare the recovered structure.
+    Затем запускается jordan_form_exact(A) и сравнивается восстановленная структура.
     """
     J0 = make_jordan_matrix(block_specs)
     n = J0.rows
     P0 = random_unimodular_matrix(n, seed=seed)
     A = sp.simplify(P0 * J0 * P0.inv())
 
-    print_title("Generated test")
-    print("Input block specs:")
+    print_title("Сгенерированный тест")
+    print("Входные спецификации блоков:")
     print(block_specs)
-    print("\nOriginal J0:")
+    print("\nИсходная J0:")
     sp.pprint(J0)
-    print("\nGenerated unimodular P0, det(P0) =", P0.det())
+    print("\nСгенерированная унимодулярная P0, det(P0) =", P0.det())
     sp.pprint(P0)
-    print("\nGenerated A = P0 * J0 * P0^{-1}:")
+    print("\nСгенерированная A = P0 * J0 * P0^{-1}:")
     sp.pprint(A)
 
     J, P, structure = jordan_form_exact(A)
@@ -410,19 +422,19 @@ def generated_test(block_specs, seed=0):
         if not found:
             expected_structure.append((lam, [size]))
 
-    print("\nRecovered J:")
+    print("\nВосстановленная J:")
     sp.pprint(J)
-    print("\nRecovered P:")
+    print("\nВосстановленная P:")
     sp.pprint(P)
 
-    print("\nVerification A*P == P*J:", sp.simplify(A * P - P * J) == sp.zeros(n, n))
-    print("Recovered structure matches input:", same_jordan_structure(expected_structure, structure))
+    print("\nПроверка A*P == P*J:", sp.simplify(A * P - P * J) == sp.zeros(n, n))
+    print("Восстановленная структура совпадает с входной:", same_jordan_structure(expected_structure, structure))
 
     return A, J, P, structure
 
 
 # =========================================================
-# Demo cases
+# Демонстрационные случаи
 # =========================================================
 
 
@@ -434,25 +446,25 @@ def demo_manual(A, name):
 
     J, P, structure = jordan_form_exact(A)
 
-    print("\nJordan matrix J:")
+    print("\nЖорданова матрица J:")
     sp.pprint(J)
 
-    print("\nTransition matrix P:")
+    print("\nМатрица перехода P:")
     sp.pprint(P)
 
-    print("\nCheck A*P == P*J:", sp.simplify(A * P - P * J) == sp.zeros(A.rows, A.cols))
+    print("\nПроверка A*P == P*J:", sp.simplify(A * P - P * J) == sp.zeros(A.rows, A.cols))
     print("det(P) =")
     sp.pprint(sp.factor(P.det()))
 
 
 if __name__ == "__main__":
-    # 1. Matrix with irrational algebraic eigenvalues +-sqrt(2).
+    # 1. Матрица с иррациональными алгебраическими собственными значениями +-sqrt(2).
     A1 = sp.Matrix([
         [0, 2],
         [1, 0]
     ])
 
-    # 2. Matrix similar to one Jordan block J_2(sqrt(2)).
+    # 2. Матрица, подобная одному жорданову блоку J_2(sqrt(2)).
     lam = sp.sqrt(2)
     J2 = make_jordan_matrix([(lam, 2)])
     P2 = sp.Matrix([
@@ -461,18 +473,18 @@ if __name__ == "__main__":
     ])
     A2 = sp.simplify(P2 * J2 * P2.inv())
 
-    # 3. Mixed symbolic Jordan structure.
-    #    Note: A may contain sqrt(2). For integer A with algebraic eigenvalues,
-    #    conjugate eigenvalues usually need to appear together.
+    # 3. Смешанная символьная жорданова структура.
+    #    Замечание: A может содержать sqrt(2). Для целочисленных A с алгебраическими
+    #    собственными значениями сопряжённые значения обычно должны встречаться вместе.
     J3 = make_jordan_matrix([(sp.sqrt(2), 1), (-sp.sqrt(2), 1), (3, 1)])
     P3 = random_unimodular_matrix(3, seed=10)
     A3 = sp.simplify(P3 * J3 * P3.inv())
 
-    demo_manual(A1, "Exact algebraic eigenvalues: lambda = +-sqrt(2)")
-    demo_manual(A2, "One Jordan block J_2(sqrt(2))")
-    demo_manual(A3, "Mixed symbolic Jordan structure")
+    demo_manual(A1, "Точные алгебраические собственные значения: lambda = +-sqrt(2)")
+    demo_manual(A2, "Один жорданов блок J_2(sqrt(2))")
+    demo_manual(A3, "Смешанная символьная жорданова структура")
 
-    # Generator tests.
+    # Тесты на основе генератора.
     generated_test([(sp.sqrt(2), 1), (-sp.sqrt(2), 1)], seed=1)
     generated_test([(3, 2), (3, 1), (-1, 1)], seed=2)
     generated_test([(sp.sqrt(3), 2)], seed=3)
